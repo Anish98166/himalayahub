@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+:root {
+  --background: #F4EDE4;
+  --foreground: #2F2F2F;
+  --brand-terracotta: #E07A5F;
+  --brand-saffron: #F2C94C;
+  --brand-himalayan-green: #81B29A;
+  --brand-rhododendron: #E63946;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-terracotta: var(--brand-terracotta);
+  --color-himalayan-green: var(--brand-himalayan-green);
+  --color-rhododendron: var(--brand-rhododendron);
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-heading: "Playfair Display", serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}

@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  MERCHANT
+  ADMIN
+}
+
+enum KycStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  fullName      String
+  passwordHash  String
+  phoneNumber   String?   @unique
+  role          UserRole  @default(USER)
+  kycStatus     KycStatus @default(UNVERIFIED)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  wallets       Wallet[]
+  transactions  Transaction[]
+  remittances   Remittance[]
+}
+
+model Wallet {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  address       String    @unique // Public key/address
+  publicKey     String    // For MPC/Signing
+  chain         String    // 'stellar' or 'solana'
+  balance       Decimal   @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  transactions  Transaction[]
+  keyShares     KeyShare[]
+}
+
+model KeyShare {
+  id          String   @id @default(uuid())
+  walletId    String
+  wallet      Wallet   @relation(fields: [walletId], references: [id])
+  shareData   String   // Encrypted fragment of the private key
+  participant String   // Who holds this share (e.g., 'user_device', 'himalayahub_kms')
+  createdAt   DateTime @default(now())
+}
+
+model Transaction {
+  id                String            @id @default(uuid())
+  userId            String
+  user              User              @relation(fields: [userId], references: [id])
+  walletId          String?
+  wallet            Wallet?           @relation(fields: [walletId], references: [id])
+  amount            Decimal
+  currency          String            @default("USD") // Or NPR/XLM/SOL
+  status            TransactionStatus @default(PENDING)
+  type              String            // 'TRANSFER', 'REMITTANCE', 'DEPOSIT', 'WITHDRAW'
+  txHash            String?           @unique // On-chain hash
+  metadata          Json?             // Extra info
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  remittanceId      String?
+  remittance        Remittance?       @relation(fields: [remittanceId], references: [id])
+}
+
+model Remittance {
+  id                String        @id @default(uuid())
+  senderId          String
+  sender            User          @relation(fields: [senderId], references: [id])
+  receiverName      String
+  receiverPhone     String
+  amount            Decimal
+  currency          String        @default("USD")
+  fee               Decimal
+  status            TransactionStatus @default(PENDING)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  transactions      Transaction[]
+}

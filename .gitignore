@@ -1,0 +1,28 @@
+node_modules/
+.next/
+.env*
+.env.local
+.DS_Store
+*.pem
+*.log
+*.tsbuildinfo
+next-env.d.ts
+dist/
+build/
+target/
+.vercel
+*.db
+*.sqlite
+
+# Turborepo
+.turbo/
+
+# Prisma
+apps/**/prisma/migrations/
+
+# Rust
+backend/target/
+
+# IDE
+.vscode/
+.idea/

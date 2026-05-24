@@ -1,0 +1,83 @@
+{
+  "app": {
+    "name": "HimalayaHub",
+    "tagline": "One Wallet for Nepal's Money, Farms, Mountains & Future"
+  },
+  "nav": {
+    "home": "Home",
+    "dashboard": "Dashboard",
+    "wallets": "Wallets",
+    "remittance": "Send Money",
+    "agrichain": "AgriChain",
+    "tourism": "Tourism Pay",
+    "login": "Login",
+    "register": "Register",
+    "logout": "Logout"
+  },
+  "auth": {
+    "welcome_back": "Welcome Back",
+    "join": "Join HimalayaHub",
+    "email": "Email",
+    "password": "Password",
+    "full_name": "Full Name",
+    "login_btn": "Login",
+    "register_btn": "Create Account",
+    "processing": "Processing..."
+  },
+  "dashboard": {
+    "greeting": "Namaste",
+    "your_wallets": "Your Wallets",
+    "add_wallet": "+ Add Wallet",
+    "quick_actions": "Quick Actions",
+    "send": "Send",
+    "receive": "Receive",
+    "exchange": "Exchange",
+    "history": "History",
+    "loading": "Loading..."
+  },
+  "wallet": {
+    "title": "Manage Wallets",
+    "stellar_desc": "Optimized for low-cost, instant remittances in Nepal.",
+    "solana_desc": "High-speed, low-fee marketplace and DeFi capabilities.",
+    "create_stellar": "Create Stellar Wallet",
+    "create_solana": "Create Solana Wallet",
+    "back": "Back to Dashboard",
+    "created": "wallet created successfully!"
+  },
+  "remittance": {
+    "title": "Send Money (Remittance)",
+    "receiver_name": "Receiver Name",
+    "receiver_phone": "Receiver Phone",
+    "amount": "Amount",
+    "currency": "Currency",
+    "send": "Send Remittance",
+    "processing": "Processing Transfer...",
+    "success": "Remittance sent successfully!",
+    "npr": "NPR",
+    "usd": "USD",
+    "xlm": "XLM"
+  },
+  "agrichain": {
+    "title": "AgriChain Marketplace",
+    "subtitle": "Fresh from Nepal's farmers directly to you",
+    "browse": "Browse Products",
+    "my_listings": "My Listings",
+    "add_product": "Add Product",
+    "search": "Search products...",
+    "organic": "Organic",
+    "location": "Location",
+    "farmer": "Farmer",
+    "buy": "Buy Now",
+    "no_products": "No products found"
+  },
+  "tourism": {
+    "title": "Tourism Pay",
+    "subtitle": "Seamless payments for your Nepal journey",
+    "hotels": "Hotels",
+    "guides": "Guides",
+    "treks": "Treks",
+    "transport": "Transport",
+    "book_now": "Book Now",
+    "my_bookings": "My Bookings"
+  }
+}
