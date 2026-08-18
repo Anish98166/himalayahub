@@ -19,6 +19,12 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
+    if (email === "demo@himalayahub.com" && password === "demo1234") {
+      localStorage.setItem("token", "demo-jwt-token");
+      router.push("/dashboard");
+      return;
+    }
+
     try {
       const res = await fetch("http://localhost:3000/api/auth/login", {
         method: "POST",
@@ -49,6 +55,10 @@ export default function LoginPage() {
               {loading ? "Processing..." : "Login"}
             </Button>
           </form>
+          <div className="mt-4 p-3 rounded-lg bg-saffron/10 border border-saffron/30">
+            <p className="text-xs text-saffron font-medium text-center">Demo Login</p>
+            <p className="text-xs text-foreground/50 text-center mt-1">demo@himalayahub.com / demo1234</p>
+          </div>
           <p className="text-center text-sm text-foreground/50 mt-4">
             Don&apos;t have an account?{" "}
             <Link href="/auth/register" className="text-terracotta hover:underline">Create Account</Link>
