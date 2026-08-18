@@ -1,15 +1,68 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { usePi } from "@/hooks/usePi";
 
-export default function PiWalletPage() {
-  const [sandbox, setSandbox] = useState(true);
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
+interface Product {
+  id: string;
+  name: string;
+  defaultAmount: number;
+  memoTemplate: string;
+  metadata: Record<string, unknown>;
+}
+
+const PRODUCTS: Product[] = [
+  {
+    id: "tip",
+    name: "Tip HimalayaHub",
+    defaultAmount: 1,
+    memoTemplate: "Thank you for supporting HimalayaHub",
+    metadata: { product: "tip" },
+  },
+  {
+    id: "remittance-fee",
+    name: "Remittance Transfer Fee",
+    defaultAmount: 0.5,
+    memoTemplate: "Remittance fee for sending Rs {amount}",
+    metadata: { product: "remittance-fee" },
+  },
+  {
+    id: "agrichain-listing",
+    name: "Featured Product Listing",
+    defaultAmount: 1,
+    memoTemplate: "Feature your product on AgriChain marketplace",
+    metadata: { product: "agrichain-listing" },
+  },
+  {
+    id: "tourism-credits",
+    name: "Tourism Pay Credits",
+    defaultAmount: 5,
+    memoTemplate: "Credits for hotels, guides & attractions",
+    metadata: { product: "tourism-credits" },
+  },
+];
+
+async function apiPost(path: string, body: unknown) {
+  const token = localStorage.getItem("token");
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+export default function PiWalletPage() {
+  const [sandbox, setSandbox] = useState(!isPiBrowser);
   const {
     status,
     error: piError,
@@ -19,8 +72,9 @@ export default function PiWalletPage() {
     createPayment: piCreatePayment,
     isPiBrowser,
   } = usePi(sandbox);
-  const [payAmount, setPayAmount] = useState("");
-  const [payMemo, setPayMemo] = useState("");
+
+  const [selectedProduct, setSelectedProduct] = useState<Product>(PRODUCTS[0]);
+  const [customAmount, setCustomAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -28,15 +82,11 @@ export default function PiWalletPage() {
 
   const ready = status === "ready" || status === "mock";
 
-  useEffect(() => {
-    setSandbox(!isPiBrowser);
-  }, [isPiBrowser]);
-
   const authenticate = useCallback(async () => {
     setAuthLoading(true);
     setError(null);
     try {
-      const piUser = await piAuthenticate();
+      const piUser = await piAuthenticate(["username", "payments"]);
       setUser(piUser);
       setResult(`Authenticated as @${piUser.username}`);
     } catch (err: unknown) {
@@ -45,12 +95,25 @@ export default function PiWalletPage() {
     setAuthLoading(false);
   }, [piAuthenticate, setUser]);
 
+  const handleIncompletePayment = useCallback(async (payment: { paymentId: string }) => {
+    try {
+      const data = await apiPost("/api/pi/recover", { payment_id: payment.paymentId });
+      if (data.success) {
+        setResult(`Recovered incomplete payment: ${payment.paymentId}`);
+      } else {
+        setError(`Recovery failed: ${data.message}`);
+      }
+    } catch (err: unknown) {
+      setError(`Recovery error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, []);
+
   const createPayment = useCallback(() => {
     if (!user) {
       setError("Authenticate first");
       return;
     }
-    const amount = parseFloat(payAmount);
+    const amount = parseFloat(customAmount) || selectedProduct.defaultAmount;
     if (isNaN(amount) || amount <= 0) {
       setError("Enter a valid amount");
       return;
@@ -59,26 +122,17 @@ export default function PiWalletPage() {
     setError(null);
     setResult(null);
 
+    const memo = selectedProduct.memoTemplate.replace("{amount}", String(amount));
+    const metadata = { ...selectedProduct.metadata, userId: user.uid, amount };
+
     piCreatePayment(
+      { amount, memo, metadata },
       {
-        amount,
-        memo: payMemo || "Payment via HimalayaHub",
-        metadata: { userId: user.uid },
-      },
-      {
+        onIncompletePaymentFound: handleIncompletePayment,
         onReadyForServerApproval: async (paymentId: string) => {
           setResult(`Server approving payment ${paymentId}...`);
           try {
-            const token = localStorage.getItem("token");
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"}/api/pi/approve`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              },
-              body: JSON.stringify({ payment_id: paymentId }),
-            });
-            const data = await res.json();
+            const data = await apiPost("/api/pi/approve", { payment_id: paymentId });
             if (!data.success) {
               setError(`Approval failed: ${data.message}`);
             }
@@ -89,16 +143,7 @@ export default function PiWalletPage() {
         onReadyForServerCompletion: async (paymentId: string, txid: string) => {
           setResult(`Completing payment ${paymentId}...`);
           try {
-            const token = localStorage.getItem("token");
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"}/api/pi/complete`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              },
-              body: JSON.stringify({ payment_id: paymentId, txid }),
-            });
-            const data = await res.json();
+            const data = await apiPost("/api/pi/complete", { payment_id: paymentId, txid });
             if (data.success) {
               setResult(`Payment successful! TX: ${txid}`);
             } else {
@@ -110,28 +155,28 @@ export default function PiWalletPage() {
           setLoading(false);
         },
         onCancel: (paymentId: string) => {
-          setError(`Payment ${paymentId} cancelled by user`);
+          setError(`Payment ${paymentId} cancelled`);
           setLoading(false);
         },
-        onError: (err, payment) => {
+        onError: (err) => {
           setError(`Payment error: ${err && typeof err === "object" ? JSON.stringify(err) : String(err)}`);
           setLoading(false);
         },
       },
     );
-  }, [user, payAmount, payMemo, piCreatePayment]);
+  }, [user, customAmount, selectedProduct, piCreatePayment, handleIncompletePayment]);
 
   return (
     <div className="min-h-screen p-6 md:p-12">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold text-saffron font-heading mb-2">
-          Pi Wallet
+          Pi Payments
         </h1>
         <p className="text-foreground/60 mb-8">
-          Send and receive Pi coins. Works in Pi Browser or sandbox mode.
+          Pay with Pi coins for HimalayaHub services.
         </p>
 
-        {/* Ready Status */}
+        {/* SDK Status */}
         <Card className="mb-8">
           <CardContent>
             <div className="flex items-center justify-between">
@@ -143,11 +188,6 @@ export default function PiWalletPage() {
                    status === "unavailable" ? "Pi SDK unavailable" :
                    "Initializing Pi SDK..."}
                 </p>
-                {status === "mock" && (
-                  <p className="text-xs text-foreground/40 mt-1">
-                    Running outside Pi Browser — using mock wallet
-                  </p>
-                )}
               </div>
               <Badge variant={ready ? "success" : "warning"}>
                 {status === "ready" ? "Live" :
@@ -166,7 +206,7 @@ export default function PiWalletPage() {
               <div>
                 <CardTitle className="text-terracotta mb-1">Sandbox Mode</CardTitle>
                 <p className="text-sm text-foreground/50">
-                  Toggle on for testing in regular browser. Disable for Pi Browser.
+                  Toggle on for testing in regular browser.
                 </p>
               </div>
               <button
@@ -211,40 +251,67 @@ export default function PiWalletPage() {
           </CardContent>
         </Card>
 
-        {/* Send Pi */}
+        {/* Product Selector */}
         <Card className="mb-8">
           <CardContent>
-            <CardTitle className="text-terracotta mb-4">Send Pi Payment</CardTitle>
+            <CardTitle className="text-terracotta mb-4">Choose a Product</CardTitle>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {PRODUCTS.map((product) => (
+                <button
+                  key={product.id}
+                  onClick={() => {
+                    setSelectedProduct(product);
+                    setCustomAmount(String(product.defaultAmount));
+                  }}
+                  className={`p-4 rounded-xl border-2 text-left transition-all ${
+                    selectedProduct.id === product.id
+                      ? "border-saffron bg-saffron/10"
+                      : "border-foreground/10 hover:border-foreground/20 bg-white/40"
+                  }`}
+                >
+                  <p className="font-semibold text-sm">{product.name}</p>
+                  <p className="text-xs text-foreground/50 mt-1">
+                    {product.defaultAmount} π
+                  </p>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Payment Form */}
+        <Card className="mb-8">
+          <CardContent>
+            <CardTitle className="text-terracotta mb-4">
+              Pay — {selectedProduct.name}
+            </CardTitle>
             <div className="space-y-4">
               <Input
                 label="Amount (π)"
                 type="number"
                 step="0.01"
                 min="0"
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
+                value={customAmount}
+                onChange={(e) => setCustomAmount(e.target.value)}
                 placeholder="0.00"
               />
-              <Input
-                label="Memo"
-                value={payMemo}
-                onChange={(e) => setPayMemo(e.target.value)}
-                placeholder="What's this for?"
-              />
+              <p className="text-xs text-foreground/40">
+                Memo: {selectedProduct.memoTemplate.replace("{amount}", customAmount || String(selectedProduct.defaultAmount))}
+              </p>
               <Button
                 onClick={createPayment}
                 disabled={loading || !user || !ready}
                 className="w-full"
                 style={{ backgroundColor: "#F2C94C", color: "#2F2F2F" }}
               >
-                {loading ? "Processing..." : `Pay ${payAmount || "0"} π`}
+                {loading ? "Processing..." : `Pay ${customAmount || selectedProduct.defaultAmount} π`}
               </Button>
             </div>
           </CardContent>
         </Card>
 
         {/* Receive */}
-        <Card>
+        <Card className="mb-8">
           <CardContent>
             <CardTitle className="text-terracotta mb-4">Receive Pi</CardTitle>
             <p className="text-sm text-foreground/60 mb-4">
@@ -278,7 +345,6 @@ export default function PiWalletPage() {
             <p className="text-sm text-rhododendron font-medium">{error}</p>
           </div>
         )}
-
         {piError && (
           <div className="mt-6 p-4 bg-rhododendron/10 rounded-xl border border-rhododendron/20">
             <p className="text-sm text-rhododendron font-medium">{piError}</p>
@@ -287,10 +353,10 @@ export default function PiWalletPage() {
 
         <div className="mt-8 p-4 bg-white/40 rounded-xl text-xs text-foreground/50 space-y-1">
           <p>Sandbox mode uses test Pi — no real value.</p>
-          <p>For production, deploy in Pi Browser and disable sandbox.</p>
+          <p>For production, set <code className="text-terracotta">PI_NETWORK_API_KEY</code> env var and deploy in Pi Browser.</p>
           {status === "mock" && (
             <p className="text-saffron font-medium mt-2">
-              Mock mode active — authenticate & payments are simulated.
+              Mock mode active — payments are simulated.
             </p>
           )}
         </div>

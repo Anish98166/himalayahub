@@ -23,15 +23,25 @@ pub struct PiPaymentResponse {
     pub tx_id: Option<String>,
 }
 
-const PI_API_BASE: &str = "https://api.minepi.com/v2";
-
-fn is_sandbox() -> bool {
-    let key = std::env::var("PI_API_KEY").unwrap_or_default();
-    key.is_empty() || key == "sandbox_api_key"
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PiPaymentInfo {
+    pub identifier: String,
+    pub amount: f64,
+    pub status: serde_json::Value,
 }
 
-fn get_api_key() -> String {
-    std::env::var("PI_API_KEY").unwrap_or_else(|_| "sandbox_api_key".to_string())
+const PI_API_BASE: &str = "https://api.minepi.com/v2";
+
+fn get_pi_api_key() -> Result<String, StatusCode> {
+    std::env::var("PI_NETWORK_API_KEY")
+        .map_err(|_| {
+            tracing::error!("PI_NETWORK_API_KEY env var not set");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+fn pi_api_key_or_sandbox() -> String {
+    std::env::var("PI_NETWORK_API_KEY").unwrap_or_else(|_| "sandbox_api_key".to_string())
 }
 
 async fn call_pi_api(
@@ -39,11 +49,12 @@ async fn call_pi_api(
     action: &str,
     txid: Option<&str>,
 ) -> Result<(), String> {
-    if is_sandbox() {
+    let api_key = pi_api_key_or_sandbox();
+    if api_key.is_empty() || api_key == "sandbox_api_key" {
+        tracing::warn!("Pi sandbox mode — skipping external API call for {}", payment_id);
         return Ok(());
     }
 
-    let api_key = get_api_key();
     let url = format!("{}/payments/{}/{}", PI_API_BASE, payment_id, action);
 
     let client = reqwest::Client::new();
@@ -57,9 +68,36 @@ async fn call_pi_api(
 
     match req.send().await {
         Ok(r) if r.status().is_success() => Ok(()),
-        Ok(r) => Err(format!("Pi API returned {}", r.status())),
-        Err(e) => Err(format!("Pi API error: {}", e)),
+        Ok(r) => {
+            let body = r.text().await.unwrap_or_default();
+            Err(format!("Pi API returned {}: {}", action, body))
+        }
+        Err(e) => Err(format!("Pi API error on {}: {}", action, e)),
     }
+}
+
+async fn fetch_payment_info(payment_id: &str) -> Result<PiPaymentInfo, String> {
+    let api_key = pi_api_key_or_sandbox();
+    if api_key.is_empty() || api_key == "sandbox_api_key" {
+        return Ok(PiPaymentInfo {
+            identifier: payment_id.to_string(),
+            amount: 0.0,
+            status: serde_json::json!("UNKNOWN"),
+        });
+    }
+
+    let url = format!("{}/payments/{}", PI_API_BASE, payment_id);
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Key {}", api_key))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch payment info: {}", e))?;
+
+    resp.json::<PiPaymentInfo>()
+        .await
+        .map_err(|e| format!("Failed to parse payment info: {}", e))
 }
 
 pub async fn approve_payment(
@@ -67,6 +105,20 @@ pub async fn approve_payment(
     State(state): State<AppState>,
     Json(payload): Json<ApprovePaymentRequest>,
 ) -> Result<Json<PiPaymentResponse>, StatusCode> {
+    let payment_info = fetch_payment_info(&payload.payment_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get payment info: {:?}", e);
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    tracing::info!(
+        "Approving Pi payment {} — amount: {}, user: {}",
+        payload.payment_id,
+        payment_info.amount,
+        auth.user_id
+    );
+
     if let Err(msg) = call_pi_api(&payload.payment_id, "approve", None).await {
         return Ok(Json(PiPaymentResponse {
             success: false,
@@ -84,11 +136,14 @@ pub async fn approve_payment(
     )
     .bind(Uuid::new_v4())
     .bind(Uuid::parse_str(&auth.user_id).unwrap_or_else(|_| Uuid::new_v4()))
-    .bind(rust_decimal::Decimal::ZERO)
+    .bind(rust_decimal::Decimal::try_from(payment_info.amount).unwrap_or(rust_decimal::Decimal::ZERO))
     .bind("PI")
     .bind("PENDING")
     .bind("PI_PAYMENT")
-    .bind(serde_json::json!({"piPaymentId": payload.payment_id}))
+    .bind(serde_json::json!({
+        "piPaymentId": payload.payment_id,
+        "amount": payment_info.amount,
+    }))
     .bind(now)
     .bind(now)
     .execute(&state.db)
@@ -137,5 +192,58 @@ pub async fn complete_payment(
         success: true,
         message: "Payment completed successfully".to_string(),
         tx_id: Some(payload.txid),
+    }))
+}
+
+pub async fn recover_incomplete_payment(
+    State(state): State<AppState>,
+    Json(payload): Json<ApprovePaymentRequest>,
+) -> Result<Json<PiPaymentResponse>, StatusCode> {
+    let payment_info = fetch_payment_info(&payload.payment_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get incomplete payment info: {:?}", e);
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    tracing::info!(
+        "Recovering incomplete Pi payment {} — status: {:?}",
+        payload.payment_id,
+        payment_info.status
+    );
+
+    let status_str = payment_info.status.get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UNKNOWN");
+
+    if status_str == "COMPLETED" || status_str == "PAID" {
+        if let Err(msg) = call_pi_api(&payload.payment_id, "complete", None).await {
+            return Ok(Json(PiPaymentResponse {
+                success: false,
+                message: format!("Recovery complete failed: {}", msg),
+                tx_id: None,
+            }));
+        }
+    } else {
+        if let Err(msg) = call_pi_api(&payload.payment_id, "approve", None).await {
+            return Ok(Json(PiPaymentResponse {
+                success: false,
+                message: format!("Recovery approve failed: {}", msg),
+                tx_id: None,
+            }));
+        }
+        if let Err(msg) = call_pi_api(&payload.payment_id, "complete", None).await {
+            return Ok(Json(PiPaymentResponse {
+                success: false,
+                message: format!("Recovery complete failed: {}", msg),
+                tx_id: None,
+            }));
+        }
+    }
+
+    Ok(Json(PiPaymentResponse {
+        success: true,
+        message: "Incomplete payment recovered".to_string(),
+        tx_id: Some(payload.payment_id),
     }))
 }

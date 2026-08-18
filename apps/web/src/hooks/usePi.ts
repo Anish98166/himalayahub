@@ -36,6 +36,7 @@ interface PiPaymentCallbacks {
   onReadyForServerCompletion: (paymentId: string, txid: string) => void;
   onCancel: (paymentId: string) => void;
   onError: (err: unknown, payment?: { paymentId: string }) => void;
+  onIncompletePaymentFound?: (payment: { paymentId: string }) => void;
 }
 
 export type PiStatus = "loading" | "unavailable" | "mock" | "ready";
@@ -97,11 +98,11 @@ export function usePi(sandbox = true) {
     return () => { cancelled = true; };
   }, [sandbox]);
 
-  const authenticate = useCallback(() => {
+  const authenticate = useCallback((scopes: string[] = ["username"]) => {
     if (status === "ready" && window.Pi) {
       return new Promise<PiUser>((resolve, reject) => {
         window.Pi!.authenticate(
-          ["username"],
+          scopes,
           (piUser: PiUser) => {
             setUser(piUser);
             resolve(piUser);
@@ -133,12 +134,21 @@ export function usePi(sandbox = true) {
     callbacks: PiPaymentCallbacks,
   ) => {
     if (status === "ready" && window.Pi) {
-      window.Pi.createPayment(paymentData, callbacks);
+      window.Pi.createPayment(paymentData, {
+        onReadyForServerApproval: callbacks.onReadyForServerApproval,
+        onReadyForServerCompletion: callbacks.onReadyForServerCompletion,
+        onCancel: callbacks.onCancel,
+        onError: callbacks.onError,
+        onIncompletePaymentFound: callbacks.onIncompletePaymentFound,
+      });
       return;
     }
 
     if (status === "mock") {
       const paymentId = `mock_payment_${Date.now()}`;
+      if (callbacks.onIncompletePaymentFound) {
+        callbacks.onIncompletePaymentFound({ paymentId: `incomplete_mock_${Date.now()}` });
+      }
       callbacks.onReadyForServerApproval(paymentId);
       setTimeout(() => {
         callbacks.onReadyForServerCompletion(paymentId, `mock_tx_${Date.now()}`);

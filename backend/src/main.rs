@@ -53,6 +53,7 @@ async fn main() {
         .route("/api/solana/faucet", post(handlers::solana::faucet))
         .route("/api/pi/approve", post(pi::approve_payment))
         .route("/api/pi/complete", post(pi::complete_payment))
+        .route("/api/pi/recover", post(pi::recover_incomplete_payment))
         .layer(cors)
         .with_state(state);
 

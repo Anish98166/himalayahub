@@ -136,3 +136,35 @@ HimalayaHub integrates Pi Network authentication as a first-class sign-in method
 **Mock mode**: When running outside the Pi Browser (local dev), `usePi` falls back to `"mock"` status and simulates authentication with a fake user. No Pi API calls are made in mock mode.
 
 **Environment**: No `PI_API_KEY` is required for the auth flow. The `/v2/me` endpoint only needs the user's access token. The `PI_API_KEY` env var is only used for payment approval/completion flows.
+
+### Pi Network Payments
+
+HimalayaHub uses Pi Network for U2A (User-to-App) payments. Users pay the app with `Pi.createPayment(...)`.
+
+**Payment products (available in `app/pi-wallet/page.tsx`):**
+
+| Product | Default Amount | Memo | Metadata |
+|---------|---------------|------|----------|
+| Tip HimalayaHub | 1 π | "Thank you for supporting HimalayaHub" | `{ product: "tip" }` |
+| Remittance Transfer Fee | 0.5 π | "Remittance fee for sending Rs {amount}" | `{ product: "remittance-fee" }` |
+| Featured Product Listing | 1 π | "Feature your product on AgriChain marketplace" | `{ product: "agrichain-listing" }` |
+| Tourism Pay Credits | 5 π | "Credits for hotels, guides & attractions" | `{ product: "tourism-credits" }` |
+
+**Payment flow:**
+
+1. `usePi` hook calls `Pi.authenticate(["username", "payments"])` to get payment scopes.
+2. User selects a product, enters amount, clicks Pay.
+3. `Pi.createPayment()` is called with `amount`, `memo`, and `metadata`.
+4. **`onIncompletePaymentFound`**: If SDK finds an in-flight payment on startup, it calls `POST /api/pi/recover` on the backend, which fetches payment status from `GET https://api.minepi.com/v2/payments/:id` and either approves or completes it.
+5. **`onReadyForServerApproval`**: Frontend calls `POST /api/pi/approve` → backend fetches payment info via Pi API, records a `Transaction` in DB, then calls `POST https://api.minepi.com/v2/payments/:id/approve` with `Authorization: Key <PI_NETWORK_API_KEY>`.
+6. **`onReadyForServerCompletion`**: Frontend calls `POST /api/pi/complete` → backend updates Transaction status, then calls `POST https://api.minepi.com/v2/payments/:id/complete` with `Authorization: Key <PI_NETWORK_API_KEY>`.
+
+**Key files:**
+- `apps/web/src/hooks/usePi.ts` — `createPayment` with `onIncompletePaymentFound` support, `["username", "payments"]` scope
+- `apps/web/src/app/pi-wallet/page.tsx` — Product selector, payment form, 4 products
+- `backend/src/handlers/pi.rs` — `approve_payment`, `complete_payment`, `recover_incomplete_payment` (all use `PI_NETWORK_API_KEY`)
+- `backend/src/main.rs` — Routes: `POST /api/pi/approve`, `POST /api/pi/complete`, `POST /api/pi/recover`
+
+**Environment**: Set `PI_NETWORK_API_KEY` env var for production. The `approve` and `complete` server-to-server calls to `api.minepi.com/v2/payments/:id/{approve,complete}` require `Authorization: Key <PI_NETWORK_API_KEY>`. Without it, the backend falls back to sandbox mode (skips external API calls).
+
+**Auth scopes**: The `["payments"]` scope is requested during Pi wallet page authentication, separate from the `["username"]` scope used during login. This ensures payment operations have the necessary permissions.
