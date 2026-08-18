@@ -4,6 +4,7 @@ import Script from "next/script";
 import "./globals.css";
 import { Providers } from "@/lib/providers";
 import { Navbar } from "@/components/layout/Navbar";
+import { PiAutoAuth } from "@/components/auth/PiAutoAuth";
 
 const inter = Inter({
   variable: "--font-body",
@@ -33,6 +34,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
         <Providers>
+          <PiAutoAuth />
           <Navbar />
           <main className="flex-1">{children}</main>
         </Providers>

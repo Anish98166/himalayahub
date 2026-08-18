@@ -46,6 +46,7 @@ async fn main() {
         .route("/health", get(health_check))
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/pi", post(auth::pi_auth))
         .route("/api/dashboard", get(handlers::get_dashboard))
         .route("/api/wallets", post(wallet::create_wallet))
         .route("/api/remittance", post(remittance::create_remittance))

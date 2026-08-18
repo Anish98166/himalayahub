@@ -1,5 +1,5 @@
 mod auth;
-pub use auth::{AuthResponse, Claims, LoginRequest, RegisterRequest};
+pub use auth::{AuthResponse, Claims, LoginRequest, PiAuthRequest, RegisterRequest};
 
 use chrono::NaiveDateTime;
 use rust_decimal::Decimal;

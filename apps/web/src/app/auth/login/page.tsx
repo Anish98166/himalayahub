@@ -6,12 +6,17 @@ import Link from "next/link";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { usePi } from "@/hooks/usePi";
+
+const API_BASE = "http://localhost:3000";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { status: piStatus, authenticate: piAuthenticate } = usePi();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [piLoading, setPiLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -26,7 +31,7 @@ export default function LoginPage() {
     }
 
     try {
-      const res = await fetch("http://localhost:3000/api/auth/login", {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -35,10 +40,31 @@ export default function LoginPage() {
       const data = await res.json();
       localStorage.setItem("token", data.token);
       router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePiLogin = async () => {
+    setPiLoading(true);
+    setError("");
+    try {
+      const piUser = await piAuthenticate();
+      const res = await fetch(`${API_BASE}/api/auth/pi`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token: piUser.accessToken }),
+      });
+      if (!res.ok) throw new Error("Pi authentication failed on server");
+      const data = await res.json();
+      localStorage.setItem("token", data.token);
+      router.push("/dashboard");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Pi login failed");
+    } finally {
+      setPiLoading(false);
     }
   };
 
@@ -47,11 +73,33 @@ export default function LoginPage() {
       <Card className="w-full max-w-md p-8">
         <CardContent>
           <CardTitle className="text-terracotta text-center mb-6">Welcome Back</CardTitle>
+
+          {piStatus !== "unavailable" && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full mb-4 border-saffron/40 text-saffron hover:bg-saffron/10"
+              onClick={handlePiLogin}
+              disabled={piLoading || loading}
+            >
+              {piLoading ? "Signing in with Pi..." : "Sign in with Pi Network"}
+            </Button>
+          )}
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-foreground/10" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white px-2 text-foreground/40">or continue with email</span>
+            </div>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
             {error && <p className="text-sm text-rhododendron font-medium">{error}</p>}
-            <Button type="submit" disabled={loading} className="w-full">
+            <Button type="submit" disabled={loading || piLoading} className="w-full">
               {loading ? "Processing..." : "Login"}
             </Button>
           </form>

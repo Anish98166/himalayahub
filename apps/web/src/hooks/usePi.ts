@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 declare global {
   interface Window {
     Pi?: {
-      init: (config: { version: string; sandbox?: boolean }) => void;
+      init: (config: { version: string; sandbox?: boolean }) => Promise<void>;
       authenticate: (
         scopes: string[],
         onSuccess: (user: PiUser) => void,
@@ -19,7 +19,7 @@ declare global {
   }
 }
 
-interface PiUser {
+export interface PiUser {
   uid: string;
   username: string;
   accessToken: string;
@@ -38,59 +38,70 @@ interface PiPaymentCallbacks {
   onError: (err: unknown, payment?: { paymentId: string }) => void;
 }
 
-type PiStatus =
-  | "loading"
-  | "unavailable"
-  | "mock"
-  | "ready";
+export type PiStatus = "loading" | "unavailable" | "mock" | "ready";
+
+const isPiBrowser =
+  typeof window !== "undefined" &&
+  window.parent !== window &&
+  document.referrer.includes("minepi.com");
 
 export function usePi(sandbox = true) {
   const [status, setStatus] = useState<PiStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<PiUser | null>(null);
 
-  const isPiBrowser =
-    typeof window !== "undefined" &&
-    window.parent !== window &&
-    document.referrer.includes("minepi.com");
-
   useEffect(() => {
-    if (isPiBrowser && typeof window.Pi !== "undefined") {
-      try {
-        window.Pi.init({ version: "2.0", sandbox });
-        setStatus("ready");
-      } catch (e) {
-        setError(`Pi SDK init failed: ${e instanceof Error ? e.message : String(e)}`);
-        setStatus("unavailable");
-      }
-      return;
-    }
+    let cancelled = false;
 
-    if (isPiBrowser) {
-      const timeout = setTimeout(() => {
-        if (typeof window.Pi !== "undefined") {
-          try {
-            window.Pi.init({ version: "2.0", sandbox });
-            setStatus("ready");
-            return;
-          } catch {
-            // fall through
+    async function initPi() {
+      if (isPiBrowser && typeof window.Pi !== "undefined") {
+        try {
+          await window.Pi.init({ version: "2.0", sandbox });
+          if (!cancelled) setStatus("ready");
+        } catch (e) {
+          if (!cancelled) {
+            setError(`Pi SDK init failed: ${e instanceof Error ? e.message : String(e)}`);
+            setStatus("unavailable");
           }
         }
-        setError("Pi SDK script not loaded in Pi Browser");
-        setStatus("unavailable");
-      }, 5000);
-      return () => clearTimeout(timeout);
+        return;
+      }
+
+      if (isPiBrowser) {
+        const timeout = setTimeout(async () => {
+          if (cancelled) return;
+          if (typeof window.Pi !== "undefined") {
+            try {
+              await window.Pi.init({ version: "2.0", sandbox });
+              if (!cancelled) setStatus("ready");
+              return;
+            } catch {
+              // fall through
+            }
+          }
+          if (!cancelled) {
+            setError("Pi SDK script not loaded in Pi Browser");
+            setStatus("unavailable");
+          }
+        }, 5000);
+        return () => {
+          cancelled = true;
+          clearTimeout(timeout);
+        };
+      }
+
+      setStatus("mock");
     }
 
-    setStatus("mock");
-  }, [sandbox, isPiBrowser]);
+    initPi();
+    return () => { cancelled = true; };
+  }, [sandbox]);
 
   const authenticate = useCallback(() => {
     if (status === "ready" && window.Pi) {
       return new Promise<PiUser>((resolve, reject) => {
         window.Pi!.authenticate(
-          ["username", "payments"],
+          ["username"],
           (piUser: PiUser) => {
             setUser(piUser);
             resolve(piUser);
@@ -100,14 +111,12 @@ export function usePi(sandbox = true) {
       });
     }
 
-    // Mock authentication for local dev
     if (status === "mock") {
       const mockUser: PiUser = {
         uid: `mock_${Math.random().toString(36).slice(2, 10)}`,
         username: `dev_user_${Math.random().toString(36).slice(2, 6)}`,
         accessToken: `mock_token_${Date.now()}`,
       };
-      // Simulate network delay
       return new Promise<PiUser>((resolve) => {
         setTimeout(() => {
           setUser(mockUser);

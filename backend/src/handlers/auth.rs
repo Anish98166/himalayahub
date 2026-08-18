@@ -4,7 +4,7 @@ use argon2::{
     Argon2,
 };
 use jsonwebtoken::{encode, Header, EncodingKey};
-use crate::models::{AppState, AuthResponse, RegisterRequest, LoginRequest, Claims, UserResponse};
+use crate::models::{AppState, AuthResponse, RegisterRequest, LoginRequest, PiAuthRequest, Claims, UserResponse};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -96,6 +96,87 @@ pub async fn login(
     Argon2::default()
         .verify_password(payload.password.as_bytes(), &parsed)
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let secret = get_jwt_secret();
+    let token = encode(
+        &Header::default(),
+        &Claims { sub: user_id.clone(), exp: 10000000000 },
+        &EncodingKey::from_secret(secret.as_ref()),
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(AuthResponse {
+        token,
+        user: UserResponse {
+            id: user_id,
+            full_name,
+            email,
+            role,
+        },
+    }))
+}
+
+pub async fn pi_auth(
+    State(state): State<AppState>,
+    Json(payload): Json<PiAuthRequest>,
+) -> Result<Json<AuthResponse>, StatusCode> {
+    let client = reqwest::Client::new();
+    let pi_user = client
+        .get("https://api.minepi.com/v2/me")
+        .header("Authorization", format!("Bearer {}", payload.access_token))
+        .send()
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    let pi_uid = pi_user["uid"]
+        .as_str()
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_string();
+    let pi_username = pi_user["username"]
+        .as_str()
+        .unwrap_or("pi_user")
+        .to_string();
+
+    let email = format!("{}@pi.network", pi_uid);
+
+    let existing = sqlx::query("SELECT id, \"fullName\", email, role::TEXT FROM \"User\" WHERE email = $1")
+        .bind(&email)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let (user_id, full_name, role) = if let Some(row) = existing {
+        let id: String = row.get("id");
+        let name: String = row.get("fullName");
+        let role: String = row.get("role");
+        (id, name, role)
+    } else {
+        let user_id = Uuid::new_v4();
+        let now = chrono::Utc::now().naive_utc();
+        let display_name = format!("Pi User: {}", pi_username);
+
+        sqlx::query(
+            "INSERT INTO \"User\" (id, email, \"fullName\", \"passwordHash\", role, \"updatedAt\")
+             VALUES ($1, $2, $3, $4, $5::\"UserRole\", $6)",
+        )
+        .bind(user_id.to_string())
+        .bind(&email)
+        .bind(&display_name)
+        .bind("")
+        .bind("USER")
+        .bind(now)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("Pi auth DB Error: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        (user_id.to_string(), display_name, "USER".to_string())
+    };
 
     let secret = get_jwt_secret();
     let token = encode(

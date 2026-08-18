@@ -109,3 +109,30 @@ Create a comprehensive **README.md** that includes:
 - Seed data and testing strategy
 
 Organize the entire output with clear headings, code blocks, and Mermaid diagrams. Make it ambitious, realistic, secure, culturally authentic, and built for long-term success in Nepal. Start generating now.
+
+### Pi Network Authentication
+
+HimalayaHub integrates Pi Network authentication as a first-class sign-in method alongside email/password.
+
+**How it works (client → server flow):**
+
+1. **SDK init**: The Pi SDK (`https://sdk.minepi.com/pi-sdk.js`) is loaded globally via `<Script>` in `app/layout.tsx`. The `usePi` hook calls `await Pi.init({ version: "2.0", sandbox })` — treated as a Promise per the SDK spec.
+2. **Auto auth**: `components/auth/PiAutoAuth.tsx` runs on every page load. If the user is in the Pi Browser, the SDK is `ready`, and no existing session token exists in `localStorage`, it automatically triggers `Pi.authenticate(["username"])` and sends the access token to the backend.
+3. **Manual auth**: The login page (`app/auth/login/page.tsx`) has a "Sign in with Pi Network" button that calls the same flow.
+4. **Backend validation**: `POST /api/auth/pi` receives `{ access_token }`, calls `GET https://api.minepi.com/v2/me` with `Authorization: Bearer <accessToken>`. On success, it finds or creates a local user (email: `{pi_uid}@pi.network`) and returns a standard JWT.
+5. **Session**: The returned JWT is stored in `localStorage` and used by all subsequent API calls via the `api()` utility.
+
+**Key files:**
+- `apps/web/src/hooks/usePi.ts` — Pi SDK wrapper: init, authenticate, createPayment, mock mode for dev
+- `apps/web/src/components/auth/PiAutoAuth.tsx` — Auto-triggers Pi auth on app load in Pi Browser
+- `apps/web/src/app/auth/login/page.tsx` — Login page with Pi sign-in button
+- `apps/web/src/app/layout.tsx` — Loads Pi SDK script + renders PiAutoAuth
+- `backend/src/handlers/auth.rs` — `pi_auth` handler (validates token via Pi API, creates/finds user, returns JWT)
+- `backend/src/models/auth.rs` — `PiAuthRequest { access_token }` struct
+- `backend/src/main.rs` — Route: `POST /api/auth/pi`
+
+**Scopes**: Only `"username"` is requested (no payment scopes during auth). Payment scopes are requested separately during `Pi.createPayment()` flows.
+
+**Mock mode**: When running outside the Pi Browser (local dev), `usePi` falls back to `"mock"` status and simulates authentication with a fake user. No Pi API calls are made in mock mode.
+
+**Environment**: No `PI_API_KEY` is required for the auth flow. The `/v2/me` endpoint only needs the user's access token. The `PI_API_KEY` env var is only used for payment approval/completion flows.
